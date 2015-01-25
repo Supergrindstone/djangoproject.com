@@ -44,6 +44,9 @@
       <form method="get" action="{% url "fundraising:donate" %}">
         <h3>Help us make it happen:</h3>
         {{ form.amount }}
+        {% if request.GET.campaign %}
+        {{ form.campaign }}
+        {% endif %}
         <div class="custom-donation">
           <span class="prefix">US $</span>
         </div>
@@ -88,9 +91,9 @@
    {% endif %}
 
 <p><b>If you use Django on a daily basis and care about the development of Django
-   itself, you should donate today.</b> Only with your support can we make sure
-   that the Web framework you base your work on can grow to be even better in
-   the coming years.</p>
+   itself, you should donate today</b> (may be <a href="/foundation/donate/#tax-deductible">tax deductible</a>). 
+   Only with your support can we make sure that the Web framework you base your work on 
+   can grow to be even better in the coming years.</p>
 
 <p>The weekly cost of the program is about US&nbsp;${{ weekly_goal|intcomma }}. <b>We're
    trying to raise an initial US&nbsp;${{ goal_amount|intcomma }} to renew the program
@@ -111,15 +114,15 @@
     {% for donor in donors_with_logo %}
       <div class="hero">
         <div class="hero-logo">
-          {% if donor.url %}<a href="{{ donor.url }}">{% endif %}
+          {% if donor.url %}<a href="{{ donor.url }}" rel="nofollow">{% endif %}
           <img src="{% if donor.logo %}{{ donor.logo.url }}{% else %}{% static 'img/fundraising-heart.png' %}{% endif %}"
             alt="{{ donor.name }}" />
           {% if donor.url %}</a>{% endif %}
         </div>
         <div class="hero-name">
-          {% if donor.url %}<a href="{{ donor.url }}">{% endif %}
+          {% if donor.url %}<a href="{{ donor.url }}" rel="nofollow">{% endif %}{% spaceless %}
             {{ donor.name }}
-          {% if donor.url %}</a>{% endif %}
+          {% endspaceless %}{% if donor.url %}</a>{% endif %}
           {% if donor.is_amount_displayed %}
             <br/><em>${{ donor.donated_amount|intcomma }}</em>
           {% endif %}
@@ -130,9 +133,9 @@
   <div class="heros">
     {% for donor in other_donors %}
       <div class="no-logo-hero">
-        {% if donor.url %}<a href="{{ donor.url }}">{% endif %}
+        {% if donor.url %}<a href="{{ donor.url }}" rel="nofollow">{% endif %}{% spaceless %}
         <span>{{ donor.name }}</span>
-        {% if donor.url %}</a>{% endif %}
+        {% endspaceless %}{% if donor.url %}</a>{% endif %}
         {% if donor.is_amount_displayed %}
           <br/><em>${{ donor.donated_amount|intcomma }}</em>
         {% endif %}

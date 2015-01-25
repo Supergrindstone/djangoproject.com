@@ -8,11 +8,13 @@ from django.shortcuts import redirect, render, get_object_or_404
 
 import stripe
 
+from .exceptions import DonationError
 from .forms import DonateForm, PaymentForm, DjangoHeroForm
 from .models import (
     DjangoHero, Donation, Testimonial, RESTART_GOAL, DEFAULT_DONATION_AMOUNT,
     DISPLAY_LOGO_AMOUNT, WEEKLY_GOAL,
 )
+from .utils import shuffle_donations
 
 
 def index(request):
@@ -27,13 +29,18 @@ def index(request):
     donors_with_logo = DjangoHero.objects.in_period(begin, end, with_logo=True)
     other_donors = DjangoHero.objects.in_period(begin, end)
 
+    campaign = request.GET.get('campaign')
+
     return render(request, 'fundraising/index.html', {
         'donated_amount': donated_amount['amount__sum'] or 0,
         'goal_amount': RESTART_GOAL,
-        'donors_with_logo': donors_with_logo,
-        'other_donors': other_donors,
+        'donors_with_logo': shuffle_donations(donors_with_logo),
+        'other_donors': shuffle_donations(other_donors),
         'total_donors': DjangoHero.objects.count(),
-        'form': DonateForm(initial={'amount': DEFAULT_DONATION_AMOUNT}),
+        'form': DonateForm(initial={
+            'amount': DEFAULT_DONATION_AMOUNT,
+            'campaign': campaign
+        }),
         'testimonial': Testimonial.objects.filter(is_active=True).order_by('?').first(),
         'display_logo_amount': DISPLAY_LOGO_AMOUNT,
         'weekly_goal': WEEKLY_GOAL,
@@ -47,40 +54,36 @@ def donate(request):
         form = PaymentForm(request.POST)
 
         if form.is_valid():
-            # Create the charge on Stripe's servers - this will charge the user's card
+            # Try to create the charge on Stripe's servers - this will charge the user's card
             try:
-                amount = form.cleaned_data['amount']
-                token = form.cleaned_data['stripe_token']
-                # First create a Stripe customer so that we can store
-                # people's email address on that object later
-                customer = stripe.Customer.create(card=token)
-                # Charge the customer's credit card on Stripe's servers;
-                # the amount is in cents!
-                charge = stripe.Charge.create(
-                    amount=int(amount * 100),
-                    currency='usd',
-                    customer=customer.id,
-                )
-            except (stripe.StripeError, ValueError):
-                # The card has been declined, we want to see what happened
-                # in Sentry
-                raise
+                donation = form.make_donation()
+            except DonationError as donation_error:
+                # If a failure happened show the error but populate the
+                # form again with those values that can be reused
+                # Note: no stripe_token added to initials here
+                initial = {
+                    'amount': form.cleaned_data['amount'],
+                    'receipt_email': form.cleaned_data['receipt_email'],
+                    'campaign': form.cleaned_data['campaign'],
+                }
+                context = {
+                    'form': PaymentForm(initial=initial),
+                    'donation_error': donation_error.message,
+                    'publishable_key': settings.STRIPE_PUBLISHABLE_KEY,
+                }
+                return render(request, 'fundraising/donate.html', context)
             else:
-                donation = Donation.objects.create(
-                    amount=amount,
-                    stripe_charge_id=charge.id,
-                    stripe_customer_id=customer.id,
-                )
                 return redirect(donation)
         else:
             if 'amount' in form.errors:
                 show_amount = True
     else:
         fixed_amount = request.GET.get('amount') or None
-        initial = {}
+        campaign = request.GET.get('campaign')
+        initial = {'campaign': campaign}
         if fixed_amount:
             try:
-                initial = {'amount': Decimal(fixed_amount)}
+                initial['amount'] = Decimal(fixed_amount)
             except DecimalException:
                 show_amount = True
         form = PaymentForm(initial=initial, fixed_amount=fixed_amount)
@@ -90,7 +93,6 @@ def donate(request):
 
     context = {
         'form': form,
-        'fixed_amount': fixed_amount,
         'publishable_key': settings.STRIPE_PUBLISHABLE_KEY,
     }
     return render(request, 'fundraising/donate.html', context)
@@ -113,7 +115,7 @@ def thank_you(request, donation):
             try:
                 customer = stripe.Customer.retrieve(donation.stripe_customer_id)
                 customer.description = hero.name or None
-                customer.email = hero.email
+                customer.email = hero.email or None
                 customer.save()
             except stripe.StripeError:
                 raise
